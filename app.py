@@ -2,7 +2,7 @@ import streamlit as st
 import pickle
 import re
 
-# Load model and vectorizer safely
+# Load model and vectorizer
 @st.cache_resource
 def load_files():
     model = pickle.load(open("fake_news_model.pkl", "rb"))
@@ -11,37 +11,43 @@ def load_files():
 
 model, vectorizer = load_files()
 
-# Text cleaning function
+# Clean text
 def clean_text(text):
     text = text.lower()
     text = re.sub(r"[^a-zA-Z ]", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-# ---------------- UI ----------------
-st.title("📰 Fake News Detector Web App by Jaya")
-st.write("Enter any news text below and I will tell you if it's **REAL** or **FAKE**.")
+st.title("📰 Fake News Detector by Jaya")
 
-user_input = st.text_area("Enter news text here...", height=200)
+user_input = st.text_area("Enter news text...", height=200)
 
 if st.button("Predict"):
     if user_input.strip() == "":
-        st.warning("Please type some news text before predicting.")
+        st.warning("Please enter some text!")
     else:
         cleaned = clean_text(user_input)
         vec = vectorizer.transform([cleaned])
-        prediction = model.predict(vec)[0]
+        pred = model.predict(vec)[0]
 
-        # If your model outputs 0/1
-        try:
-            prediction = prediction.lower()
-        except:
-            pass  # for int values
+        # -------------------------------
+        # FIX: handle both numeric + string outputs
+        # -------------------------------
+        if isinstance(pred, (int, float)):
+            # Example mapping (common)
+            # 1 → fake
+            # 0 → real
+            if pred == 1:
+                st.error("❌ Fake News Detected!")
+            else:
+                st.success("✔️ Real News Detected!")
 
-        # Handle both int and string model outputs
-        if prediction in ["fake", 0, "0"]:
-            st.error("❌ Fake News Detected!")
         else:
-            st.success("✔️ Real News Detected!")
+            pred = str(pred).lower()
+            if "fake" in pred:
+                st.error("❌ Fake News Detected!")
+            else:
+                st.success("✔️ Real News Detected!")
+
 
 
