@@ -1,91 +1,69 @@
 import pandas as pd
-import pickle
-import re
 from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.svm import LinearSVC
-from sklearn.metrics import classification_report
+from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments
+import torch
 
-
-# ----------------------------------------------------------
-# TEXT CLEANING FUNCTION
-# ----------------------------------------------------------
-def clean_text(text):
-    text = text.lower()
-    text = re.sub(r"[^a-zA-Z ]", " ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
-
-
-# ----------------------------------------------------------
-# LOAD DATASET
-# ----------------------------------------------------------
-# IMPORTANT:
-# Your CSV must contain:  text , label
-# Label should be 'fake' or 'real'
+# Load dataset (must have columns: text, label)
 df = pd.read_csv("fake_news_dataset.csv")
 
-# Clean text column
-df["text"] = df["text"].astype(str).apply(clean_text)
+# Convert label to int if needed
+df["label"] = df["label"].apply(lambda x: 1 if str(x).lower() == "fake" else 0)
 
-# Convert labels to numeric
-# fake = 1 , real = 0
-df["label"] = df["label"].map({"fake": 1, "real": 0})
-
-# Drop rows with missing labels
-df = df.dropna(subset=["label"])
-
-
-# ----------------------------------------------------------
-# TRAIN / TEST SPLIT
-# ----------------------------------------------------------
-X_train, X_test, y_train, y_test = train_test_split(
-    df["text"],
-    df["label"],
-    test_size=0.2,
-    random_state=42,
-    stratify=df["label"]
+# Train-test split
+train_texts, test_texts, train_labels, test_labels = train_test_split(
+    df["text"].tolist(), df["label"].tolist(), test_size=0.2, random_state=42
 )
 
+# Load tokenizer
+tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 
-# ----------------------------------------------------------
-# TF-IDF VECTORIZER
-# ----------------------------------------------------------
-vectorizer = TfidfVectorizer(
-    max_features=50000,        # large feature space = better accuracy
-    ngram_range=(1, 2),        # unigrams + bigrams
-    stop_words="english"
+# Tokenize
+train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=256)
+test_encodings = tokenizer(test_texts, truncation=True, padding=True, max_length=256)
+
+class FakeNewsDataset(torch.utils.data.Dataset):
+    def __init__(self, encodings, labels):
+        self.encodings = encodings
+        self.labels = labels
+    
+    def __getitem__(self, idx):
+        return {
+            key: torch.tensor(val[idx]) for key, val in self.encodings.items()
+        } | {"labels": torch.tensor(self.labels[idx])}
+    
+    def __len__(self):
+        return len(self.labels)
+
+train_dataset = FakeNewsDataset(train_encodings, train_labels)
+test_dataset = FakeNewsDataset(test_encodings, test_labels)
+
+# Load BERT model
+model = BertForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=2)
+
+# Training setup
+training_args = TrainingArguments(
+    output_dir="./bert_output",
+    evaluation_strategy="epoch",
+    learning_rate=2e-5,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    num_train_epochs=3,
+    weight_decay=0.01,
+    save_total_limit=1,
 )
 
-X_train_vec = vectorizer.fit_transform(X_train)
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=test_dataset
+)
 
+trainer.train()
 
-# ----------------------------------------------------------
-# TRAIN SVM MODEL
-# ----------------------------------------------------------
-model = LinearSVC()
-model.fit(X_train_vec, y_train)
+# Save model
+model.save_pretrained("bert_fake_news_model")
+tokenizer.save_pretrained("bert_fake_news_model")
 
-print("Training completed successfully.")
-print("Evaluating model...\n")
+print("Model training complete! Saved to folder: bert_fake_news_model")
 
-
-# ----------------------------------------------------------
-# MODEL EVALUATION
-# ----------------------------------------------------------
-X_test_vec = vectorizer.transform(X_test)
-y_pred = model.predict(X_test_vec)
-
-print(classification_report(y_test, y_pred))
-
-
-# ----------------------------------------------------------
-# SAVE MODEL + VECTORIZER
-# ----------------------------------------------------------
-pickle.dump(model, open("fake_news_model.pkl", "wb"))
-pickle.dump(vectorizer, open("vectorizer.pkl", "wb"))
-
-print("\nModel and vectorizer saved successfully!")
-print("Files generated:")
-print("  - fake_news_model.pkl")
-print("  - vectorizer.pkl")
