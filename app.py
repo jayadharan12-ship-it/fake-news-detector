@@ -1,6 +1,7 @@
 import streamlit as st
 import pickle
 import re
+import numpy as np
 
 # Load model and vectorizer
 @st.cache_resource
@@ -19,35 +20,39 @@ def clean_text(text):
     return text.strip()
 
 st.title("📰 Fake News Detector by Jaya")
+st.write("Enter the news text below and I will analyze it.")
 
-user_input = st.text_area("Enter news text...", height=200)
+user_input = st.text_area("News content:", height=200)
 
 if st.button("Predict"):
     if user_input.strip() == "":
-        st.warning("Please enter some text!")
+        st.warning("Please enter some news text!")
     else:
         cleaned = clean_text(user_input)
         vec = vectorizer.transform([cleaned])
+
+        # Model prediction
         pred = model.predict(vec)[0]
 
-        # -------------------------------
-        # FIX: handle both numeric + string outputs
-        # -------------------------------
-        if isinstance(pred, (int, float)):
-            # Example mapping (common)
-            # 1 → fake
-            # 0 → real
-            if pred == 1:
+        # Try probability-based detection (best + most accurate)
+        try:
+            proba = model.predict_proba(vec)[0]
+
+            # Assume class 1 is "fake" and class 0 is "real" (most ML models follow this)
+            fake_prob = proba[1]
+            real_prob = proba[0]
+
+            if fake_prob > real_prob:
+                st.error(f"❌ Fake News Detected! (Confidence: {fake_prob:.2f})")
+            else:
+                st.success(f"✔️ Real News Detected! (Confidence: {real_prob:.2f})")
+
+        except:
+            # Fallback if predict_proba is unavailable
+            pred_str = str(pred).lower()
+
+            if pred_str in ["1", "fake", "true", "yes"]:
                 st.error("❌ Fake News Detected!")
             else:
                 st.success("✔️ Real News Detected!")
-
-        else:
-            pred = str(pred).lower()
-            if "fake" in pred:
-                st.error("❌ Fake News Detected!")
-            else:
-                st.success("✔️ Real News Detected!")
-
-
 
